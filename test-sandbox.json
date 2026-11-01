@@ -1,5 +1,0 @@
-{
-  "code": "public class Main {\n    public static void main(String[] args) {\n        System.out.println(Integer.parseInt(args[0]) + Integer.parseInt(args[1]));\n    }\n}",
-  "language": "java",
-  "inputList": ["1 2", "2 3"]
-}

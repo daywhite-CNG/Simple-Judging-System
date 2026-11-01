@@ -2,7 +2,9 @@
 
 > 本目录当前内容：`yuoj-backend` = **微服务版**（原压缩包 `鱼 OJ 在线判题系统（微服务版本）.zip` 解压而来，外层 `yuoj-backend-microservice-master/` 已剥离），
 > `yuoj-frontend`、`yuoj-code-sandbox` 沿用之前的单体版配套代码。
-> 原始压缩包仍完整保留在 `D:\BaiduNetdiskDownload\OJ在线判题系统源码\`，未做任何改动。
+>
+> ⚠️ 2026-11-01 更新：根目录的 8 个 `.bat` / `test-sandbox.*` 启动脚本**已删除**，改由本文 §4 的手动命令接替。
+> 原压缩包已不在本机（`D:\BaiduNetdiskDownload\` 路径不存在，全盘未搜到该 zip），**本仓库是唯一副本**，且 git 仅 1 个提交 `c63be05`。
 
 ---
 
@@ -48,7 +50,7 @@
 ## 2. 目录结构
 
 ```
-D:\WorkSpace\JavaProject\yuoj\
+F:\WorkSpace\JavaProject\yuoj\
 ├── yuoj-backend\                     微服务版后端（Maven 聚合工程，7 个模块）
 │   ├── pom.xml
 │   ├── yuoj-backend-common\          通用工具、异常、统一响应
@@ -60,39 +62,38 @@ D:\WorkSpace\JavaProject\yuoj\
 │   ├── yuoj-backend-judge-service\    8104
 │   ├── docker-compose.env.yml        中间件编排（mysql/redis/rabbitmq/nacos）
 │   ├── docker-compose.service.yml    服务编排
-│   └── mysql-init\create_table.sql   建库 + 6 张表
+│   └── mysql-init\                   create_table.sql（建库 + 3 张表）
+│                                     migrate-drop-unused-20261101.sql（已执行，幂等留存）
 ├── yuoj-frontend\                    8080
 ├── yuoj-code-sandbox\                8090
-├── init-db.bat                       建库导表
-├── start-all.bat                     一键启动（中间件 → 沙箱 → 后端 → 前端）
-├── start-backend.bat                 只启动 4 个后端服务
-├── start-sandbox.bat                 只启动代码沙箱
-├── start-frontend.bat                只启动前端
-├── stop-all.bat                      停止 java / node / yuoj-* 容器
-├── test-sandbox.bat                  沙箱冒烟测试
-└── promote-admin.sql                 把注册账号提权为管理员
+├── promote-admin.sql                 把注册账号提权为管理员
+└── clean-comments.py                 源码注释清理工具（干跑 / --apply）
 ```
+
+> 启动脚本已于 2026-11-01 删除，见 §4 手动命令。
 
 ---
 
-## 3. 前置状态（本机实测）
+## 3. 前置状态（本机实测 2026-11-01）
 
 | 项 | 状态 |
 |---|---|
-| JDK 8 | ✅ `C:\Program Files\Java\jdk-8`（jdk8u504），脚本内临时指定，**不影响系统 JAVA_HOME** |
-| Maven 3.9.16 | ✅ `D:\Dev\Maven`，`mvn` 已在 PATH |
-| MySQL 8.0.46 @3306 | ✅ 已运行，`root / 123456`（已实测连通） |
+| JDK 8 | ✅ `F:\dev\java\8`（**系统 JAVA_HOME 是 `F:\dev\java\21`，必须手动覆盖**，见 §4-⓪） |
+| Maven 3.9.9 | ✅ `F:\dev\maven\3.9.9`，`mvn` 已在 PATH（README 旧版写的 `D:\Dev\Maven` 不存在） |
+| MySQL 8.4.13 @3306 | ✅ 已运行，`root / 123456`。**mysql.exe 不在 PATH**，完整路径：`F:\dev\mysql\8.4.13\bin\mysql.exe` |
 | Redis @6379 | ✅ 已运行，**无密码** |
 | Node / npm | ✅ |
-| 数据库 `yuoj` | ✅ 已建，6 张表，`user` 表已有 1 个账号 |
-| 后端 8 个模块编译 | ✅ `mvn -B -DskipTests install` BUILD SUCCESS（26 秒） |
-| **Docker Desktop** | ❌ **未启动** —— RabbitMQ、Nacos、代码沙箱都依赖它，必须你手动开 |
+| 数据库 `yuoj` | ✅ 已建，**3 张表**（`user` / `question` / `question_submit`），`user` 表 1 个账号 `test001`（角色 `user`，非 admin） |
+| 后端 7 个模块 jar | ✅ 已构建于 2026-11-01 15:45，字节码 major 52（Java 8） |
+| 沙箱 jar | ✅ 已构建于 2026-11-01 13:16 |
+| Docker Desktop | ✅ 已运行（RabbitMQ 5672 / Nacos 8848 均在 LISTENING） |
 
-### 3-1 Docker Desktop（必须你手动做）
+### 3-1 Docker Desktop 前置检查
 
 1. 启动 Docker Desktop，等左下角变绿
 2. Settings → General → 勾选 **Expose daemon on tcp://localhost:2375 without TLS**（代码沙箱走 TCP 连接，不用 `docker.sock`）
-3. 预拉镜像，避免首次判题卡住：
+3. 验证：`curl http://localhost:2375/_ping` → 返回 `OK`
+4. 预拉镜像，避免首次判题卡住：
    ```bash
    docker pull eclipse-temurin:8-jre-alpine
    docker pull rabbitmq:3.12.6-management
@@ -107,71 +108,130 @@ D:\WorkSpace\JavaProject\yuoj\
 
 ---
 
-## 4. 部署步骤
+## 4. 部署步骤（手动命令）
 
-### ① 建库导表（只需一次，已验证）
+> 原先由 `.bat` 承担的环境变量与启动顺序，现在必须手动做对。**⓪ 和 ③ 的 JAVA_HOME 覆盖最易踩**：
+> 项目是 Spring Boot 2.6.13 + `<java.version>1.8</java.version>`，而系统默认是 JDK 21，不覆盖会直接编译失败。
+
+### ⓪ 每个新终端先设环境（PowerShell）
 
 ```powershell
-# 非交互（推荐，便于自动化）
-D:\WorkSpace\JavaProject\yuoj\init-db.bat root 123456
-
-# 或直接双击，按提示输入用户名密码
+cd F:\WorkSpace\JavaProject\yuoj
+$env:JAVA_HOME = 'F:\dev\java\8'
+$env:PATH      = "$env:JAVA_HOME\bin;$env:PATH"
+$env:MAVEN_OPTS = ''          # 清掉高版本 JDK 专用参数，否则 JDK 8 报 Unrecognized option
+java -version                 # 确认输出 1.8.x 再继续
 ```
 
-脚本会把 `yuoj-backend\mysql-init\create_table.sql` 导入，建库 `yuoj` + 6 张表：
-`user` / `question` / `question_submit` / `post` / `post_thumb` / `post_favour`。
+### ① 建库导表（只需一次）
+
+```powershell
+# mysql.exe 不在 PATH，用完整路径
+& 'F:\dev\mysql\8.4.13\bin\mysql.exe' -uroot -p123456 -e "source F:/WorkSpace/JavaProject/yuoj/yuoj-backend/mysql-init/create_table.sql"
+
+# 验证：应看到 3 张表
+& 'F:\dev\mysql\8.4.13\bin\mysql.exe' -uroot -p123456 -e "use yuoj; show tables;"
+```
+
+建库 `yuoj` + **3 张表**：`user` / `question` / `question_submit`。
 SQL 里全是 `create ... if not exists`，**重复执行不会清空已有数据**。
+
+> 旧版文档写的“6 张表含 post/post_thumb/post_favour”已过时：帖子三表属于原单服版社区功能，
+> 微服务版无 post-service，已于 2026-11-01 通过 `migrate-drop-unused-20261101.sql` 删除。
 
 ### ② 起中间件（RabbitMQ + Nacos）
 
 ```powershell
-docker compose -f D:\WorkSpace\JavaProject\yuoj\yuoj-backend\docker-compose.env.yml up -d rabbitmq nacos
+docker compose -f F:\WorkSpace\JavaProject\yuoj\yuoj-backend\docker-compose.env.yml up -d rabbitmq nacos
 ```
 
 验证：
 - Nacos：<http://localhost:8848/nacos>（默认 `nacos / nacos`）
 - RabbitMQ：<http://localhost:15672>（默认 `guest / guest`）
 
-### ③ 起后端 4 个服务
+### ③ 编译 + 起后端 4 个服务
 
 ```powershell
-D:\WorkSpace\JavaProject\yuoj\start-backend.bat
+# 先确认 Nacos 已起（否则服务注册失败）
+netstat -ano | findstr ":8848"
+
+# 编译（必须在线构建，离线会报 Non-resolvable parent POM，见 §7-1）
+cd F:\WorkSpace\JavaProject\yuoj\yuoj-backend
+mvn -B -DskipTests install
 ```
 
-脚本会：校验 JDK 8 → 探测 Nacos 8848 → `mvn install` 装好公共模块 → 依次在**独立窗口**启动
-user(8102) → question(8103) → judge(8104) → gateway(8101)，每个间隔 10 秒。
+然后**开 4 个独立终端**，每个先跑 §4-⓪ 的环境设置，再分别执行（顺序 user → question → judge → gateway，间隔约 10 秒）：
 
-验证：
+```powershell
+java -jar F:\WorkSpace\JavaProject\yuoj\yuoj-backend\yuoj-backend-user-service\target\yuoj-backend-user-service-0.0.1-SNAPSHOT.jar
+java -jar F:\WorkSpace\JavaProject\yuoj\yuoj-backend\yuoj-backend-question-service\target\yuoj-backend-question-service-0.0.1-SNAPSHOT.jar
+java -jar F:\WorkSpace\JavaProject\yuoj\yuoj-backend\yuoj-backend-judge-service\target\yuoj-backend-judge-service-0.0.1-SNAPSHOT.jar
+java -jar F:\WorkSpace\JavaProject\yuoj\yuoj-backend\yuoj-backend-gateway\target\yuoj-backend-gateway-0.0.1-SNAPSHOT.jar
+```
+
+或用一条 PowerShell 开 4 个错开启动的窗口（用 `cmd /k` 规避 PowerShell 嵌套引号转义）：
+
+```powershell
+$root = 'F:\WorkSpace\JavaProject\yuoj'
+foreach ($d in 'yuoj-backend-user-service','yuoj-backend-question-service','yuoj-backend-judge-service','yuoj-backend-gateway') {
+  $jar = Join-Path $root "yuoj-backend\$d\target\$d-0.0.1-SNAPSHOT.jar"
+  # jar 路径无空格，无需嵌套引号（PowerShell 转义符是反引号而非反斜杠）
+  Start-Process cmd -ArgumentList '/k', "title $d && set JAVA_HOME=F:\dev\java\8 && set PATH=F:\dev\java\8\bin;%PATH% && set MAVEN_OPTS= && java -jar $jar"
+  Start-Sleep -Seconds 10
+}
+```
+
+验证（等约 60 秒）：
 - 网关文档：<http://localhost:8101/doc.html>（Knife4j 聚合了 3 个子服务的 Swagger）
 - Nacos 控制台 → 服务列表 → 应看到 `yuoj-backend-user-service`、`yuoj-backend-question-service`、`yuoj-backend-judge-service`、`yuoj-backend-gateway`
+
+> 注意：**后端入口是 8101，不是 8080**。8080 是前端 devServer。旧 `start-backend.bat` 末尾提示“访问 8080”是错的。
 
 ### ④ 起代码沙箱
 
 ```powershell
-D:\WorkSpace\JavaProject\yuoj\start-sandbox.bat
-curl http://localhost:8090/health      # → ok
+# 沙箱走 TCP 连 Docker，不读 docker.sock
+$env:DOCKER_HOST = 'tcp://localhost:2375'
+curl.exe -s --max-time 5 http://localhost:2375/_ping      # → OK
+
+cd F:\WorkSpace\JavaProject\yuoj\yuoj-code-sandbox
+mvn -B -DskipTests package
+java -jar target\yuoj-code-sandbox-0.0.1-SNAPSHOT.jar
 ```
+
+验证：`curl http://localhost:8090/health` → `ok`
 
 ### ⑤ 起前端
 
 ```powershell
-D:\WorkSpace\JavaProject\yuoj\start-frontend.bat
+cd F:\WorkSpace\JavaProject\yuoj\yuoj-frontend
+if (-not (Test-Path node_modules)) { npm install --legacy-peer-deps }   # 首次约几分钟
+npm run serve
 ```
 
-打开 <http://localhost:8080> → 登录（`user` 表已有账号）或注册 → 若需管理员，改 `promote-admin.sql` 里的账号后执行：
+打开 <http://localhost:8080> → 登录（现有账号 `test001`）或注册 → 若需管理员，改 `promote-admin.sql` 里的账号后执行：
 
 ```powershell
-mysql -uroot -p123456 < D:\WorkSpace\JavaProject\yuoj\promote-admin.sql
+& 'F:\dev\mysql\8.4.13\bin\mysql.exe' -uroot -p123456 -e "source F:/WorkSpace/JavaProject/yuoj/promote-admin.sql"
 ```
 
-### 一键启动 / 停止
+### 停止
+
+按端口精确杀（不要误杀 Nacos 8848 / RabbitMQ 5672 / MySQL 3306 / Redis 6379）：
 
 ```powershell
-start-all.bat     # 中间件 → 沙箱 → 4 个后端 → 前端
-stop-all.bat      # 停 java（后端+沙箱）、node（前端）、yuoj-* 容器
+foreach ($port in 8080,8090,8101,8102,8103,8104) {
+  $pids = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+          Select-Object -ExpandProperty OwningProcess -Unique
+  foreach ($procId in $pids) {
+    Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+    "已终止 端口 $port -> PID $procId"
+  }
+}
+docker compose -f F:\WorkSpace\JavaProject\yuoj\yuoj-backend\docker-compose.env.yml stop rabbitmq nacos
 ```
 
-> `start-all.bat` 里 Docker 未运行时只警告并询问是否继续，不会静默失败。
+> 旧 `stop-all.bat` 只按端口 `taskkill`，**并没有**停容器和 node 进程（README 旧描述有误，已修正）。
 
 ---
 
@@ -187,37 +247,24 @@ judgeConfig: {"timeLimit":1000,"memoryLimit":100,"stackLimit":100}
 提交 Java 代码后：提交记录 → `question_submit.status` 走 `0 待判题 → 1 判题中 → 2 成功`，
 判题结论在 `judgeInfo.message`（Accepted / Wrong Answer / Time Limit Exceeded …）。
 
-沙箱冒烟测试：
+沙箱冒烟测试（需先完成 §4-④；`auth: secretKey` 是硬编码密钥，见 `MainController.java`）：
 
 ```powershell
-D:\WorkSpace\JavaProject\yuoj\test-sandbox.bat
-# 期望返回含 "outputList":["3"] 的 JSON
+curl.exe -s -H "auth: secretKey" -H "Content-Type: application/json" -X POST http://localhost:8090/executeCode -d '{"code":"public class Main { public static void main(String[] a){ System.out.println(Integer.parseInt(a[0])+Integer.parseInt(a[1])); } }","language":"java","inputList":["1 2","2 3"]}'
+# 期望返回含 "outputList":["3","5"] 的 JSON
 ```
 
----
-
-## 6. 相对官方压缩包已做的改动
-
-| # | 位置 | 改动 | 原因 |
-|---|---|---|---|
-| 1 | 解压结构 | 剥掉 `yuoj-backend-microservice-master/` 外层 | 与 `yuoj-frontend` / `yuoj-code-sandbox` 平级，路径统一 |
-| 2 | `init-db.bat` | 路径改为 `yuoj-backend\mysql-init\create_table.sql`，支持 `参数直传` 非交互模式 | 微服务版 SQL 在 `mysql-init/` 下；便于自动化验证 |
-| 3 | `start-backend.bat` | 从「单服务 mvnw spring-boot:run」改为「install + 4 服务独立窗口」 | 微服务版无 `mvnw`，且必须起 4 个进程 |
-| 4 | `start-all.bat` | 新增 | 一条命令串起全链路 |
-| 5 | `stop-all.bat` | 端口检查扩展到 8080/8090/8101~8104，新增 `yuoj-*` 容器清理 | 单服务时代只查 3 个端口 |
-| 6 | 全部 `.bat` | 编码改为 **GBK**，去掉 `chcp 65001` | 见 §7-2 |
-
-其余源码未改：`application.yml` 里 MySQL 就是 `root/123456`（与本机一致），Redis 无密码所以 `password` 保持注释，Nacos/RabbitMQ 用 compose 默认值。
+> 原 `test-sandbox.bat` + `test-sandbox.json` 已删（2026-11-01）。
 
 ---
 
-## 7. 排错对照表（都是本机真实踩过的）
+## 6. 排错对照表（都是本机真实踩过的）
 
 | # | 现象 | 原因与处理 |
 |---|---|---|
 | 7-1 | `mvn -o` 报 `Non-resolvable parent POM ... spring-cloud-dependencies-parent:pom:3.1.5 (present, but unavailable)` | 该 POM 在本地 `~/.m2` 里存在，但记录的来源仓库 ID 与当前构建上下文不符，离线模式判定不可用。**用在线构建**（`mvn -B -DskipTests install`），依赖已缓存后 26 秒完成 |
-| 7-2 | `.bat` 里某行中文被劈成两条命令，报 `'xx键关闭' is not recognized` 或 `'Profile' is not recognized` | **cmd 的 UTF-8 批处理失步 bug**：`chcp 65001` + UTF-8 存盘的 `.bat` 中，中文行会让**下一行**被截断。本目录 4 个脚本已改为 **GBK 编码 + 不设 chcp**（改动原因见 §6-6）。今后改这些脚本务必用 GBK/ANSI 保存 |
-| 7-3 | 启动报 `Unrecognized option: --enable-native-access=ALL-UNNAMED` | 系统 `MAVEN_OPTS` 是 JDK 25 专用参数，JDK 8 不认。所有启动脚本已内置 `set "MAVEN_OPTS="` |
+| 7-2 | 已删脚本后仅在从 git 恢复 `.bat` 时适用：`.bat` 里中文行被劈成两条命令，报 `'xx键关闭' is not recognized` | **cmd 的 UTF-8 批处理失步 bug**：`chcp 65001` + UTF-8 存盘的 `.bat` 中，中文行会让**下一行**被截断。原脚本用 **GBK 编码 + 不设 chcp**（见 §6-6）；本文档的 PowerShell 命令不受此限制 |
+| 7-3 | 启动报 `Unrecognized option: --enable-native-access=ALL-UNNAMED` | 系统 `MAVEN_OPTS` 可能带高版本 JDK 专用参数，JDK 8 不认。手动构建前先 `$env:MAVEN_OPTS = ''`（见 §4-⓪）；原脚本内置 `set "MAVEN_OPTS="`，脚本已删需自己设 |
 | 7-4 | 报 `Unable to connect to Redis` | Redis 没起，或 `application.yml` 里取消注释了 `redis.password`（本机 Redis 无密码，必须保持注释） |
 | 7-5 | 报 `Communications link failure` | MySQL 没起 / 密码不是 `123456` / 库 `yuoj` 没建 |
 | 7-6 | 服务起不来，日志刷 Nacos 连接失败 | Nacos 没起（`docker ps` 看 `yuoj-nacos`），或 8848 被占 |
@@ -231,7 +278,7 @@ D:\WorkSpace\JavaProject\yuoj\test-sandbox.bat
 
 ---
 
-## 8. 已知限制
+## 7. 已知限制
 
 | 限制 | 说明 |
 |---|---|
@@ -247,7 +294,8 @@ D:\WorkSpace\JavaProject\yuoj\test-sandbox.bat
 
 ---
 
-## 9. 回滚
+## 8. 回滚
 
-- 数据库 `yuoj` 可 `drop database yuoj;` 后重跑 `init-db.bat`
-- 中间件容器：`docker compose -f yuoj-backend\docker-compose.env.yml down`（数据在 `yuoj-backend\.mysql-data` 等目录，如需彻底清理一并删除）
+- 数据库 `yuoj` 可 `drop database yuoj;` 后重跑 §4-① 的建库命令
+- 中间件容器：`docker compose -f F:\WorkSpace\JavaProject\yuoj\yuoj-backend\docker-compose.env.yml down`（数据在 `yuoj-backend\.mysql-data` 等目录，如需彻底清理一并删除）
+- **已删除的 8 个启动脚本**（可从 git 恢复）：`git checkout HEAD -- '*.bat' test-sandbox.json`
