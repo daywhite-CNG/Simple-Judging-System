@@ -4,7 +4,7 @@
 > `yuoj-frontend`、`yuoj-code-sandbox` 沿用之前的单体版配套代码。
 >
 > ⚠️ 2026-11-01 更新：根目录的 8 个 `.bat` / `test-sandbox.*` 启动脚本**已删除**，改由本文 §4 的手动命令接替。
-> 原压缩包已不在本机（`D:\BaiduNetdiskDownload\` 路径不存在，全盘未搜到该 zip），**本仓库是唯一副本**，且 git 仅 1 个提交 `c63be05`。
+> 原压缩包已不在本机，**本仓库是唯一副本**。
 
 ---
 
@@ -50,7 +50,7 @@
 ## 2. 目录结构
 
 ```
-F:\WorkSpace\JavaProject\yuoj\
+<项目根目录>\                        clone 到任意盘符均可，下文用 $repo 指代
 ├── yuoj-backend\                     微服务版后端（Maven 聚合工程，7 个模块）
 │   ├── pom.xml
 │   ├── yuoj-backend-common\          通用工具、异常、统一响应
@@ -66,11 +66,10 @@ F:\WorkSpace\JavaProject\yuoj\
 │                                     migrate-drop-unused-20261101.sql（已执行，幂等留存）
 ├── yuoj-frontend\                    8080
 ├── yuoj-code-sandbox\                8090
-├── promote-admin.sql                 把注册账号提权为管理员
-└── clean-comments.py                 源码注释清理工具（干跑 / --apply）
 ```
 
-> 启动脚本已于 2026-11-01 删除，见 §4 手动命令。
+> 根目录启动脚本（`*.bat`）、`promote-admin.sql`、`clean-comments.py` 已于 2026-11-01 删除：
+> 提权语句已内联到 §4-⑤，启动改用 §4 手动命令。
 
 ---
 
@@ -78,9 +77,9 @@ F:\WorkSpace\JavaProject\yuoj\
 
 | 项 | 状态 |
 |---|---|
-| JDK 8 | ✅ `F:\dev\java\8`（**系统 JAVA_HOME 是 `F:\dev\java\21`，必须手动覆盖**，见 §4-⓪） |
-| Maven 3.9.9 | ✅ `F:\dev\maven\3.9.9`，`mvn` 已在 PATH（README 旧版写的 `D:\Dev\Maven` 不存在） |
-| MySQL 8.4.13 @3306 | ✅ 已运行，`root / 123456`。**mysql.exe 不在 PATH**，完整路径：`F:\dev\mysql\8.4.13\bin\mysql.exe` |
+| JDK 8 | ✅ 已装。系统 `JAVA_HOME` 指向更高版本，**构建前必须覆盖**（见 §4-⓪）—— 本项目 Spring Boot 2.6.13 + `java.version 1.8` |
+| Maven | ✅ `mvn` 已在 PATH |
+| MySQL @3306 | ✅ 已运行，`root / 123456`。`mysql.exe` 可能不在 PATH，统一在 §4-⓪ 指定 |
 | Redis @6379 | ✅ 已运行，**无密码** |
 | Node / npm | ✅ |
 | 数据库 `yuoj` | ✅ 已建，**3 张表**（`user` / `question` / `question_submit`），`user` 表 1 个账号 `test001`（角色 `user`，非 admin） |
@@ -110,15 +109,20 @@ F:\WorkSpace\JavaProject\yuoj\
 
 ## 4. 部署步骤（手动命令）
 
-> 原先由 `.bat` 承担的环境变量与启动顺序，现在必须手动做对。**⓪ 和 ③ 的 JAVA_HOME 覆盖最易踩**：
-> 项目是 Spring Boot 2.6.13 + `<java.version>1.8</java.version>`，而系统默认是 JDK 21，不覆盖会直接编译失败。
+> 原先由 `.bat` 承担的环境变量与启动顺序，现在必须手动做对。**⓪ 的 JAVA_HOME 覆盖最易踩**：
+> 系统默认 JDK 若高于 1.8，不覆盖会直接编译失败。
 
 ### ⓪ 每个新终端先设环境（PowerShell）
 
 ```powershell
-cd F:\WorkSpace\JavaProject\yuoj
-$env:JAVA_HOME = 'F:\dev\java\8'
-$env:PATH      = "$env:JAVA_HOME\bin;$env:PATH"
+# 先按自己的安装位置改这三行，后续所有命令都复用它们（本文档不写死任何本机路径）
+$repo  = 'X:\path\to\yuoj'                  # 项目根目录
+$jdk8  = 'X:\path\to\jdk\8'                 # JDK 8 安装目录
+$mysql = 'X:\path\to\mysql\bin\mysql.exe'   # mysql.exe 完整路径
+
+cd $repo
+$env:JAVA_HOME  = $jdk8
+$env:PATH       = "$env:JAVA_HOME\bin;$env:PATH"
 $env:MAVEN_OPTS = ''          # 清掉高版本 JDK 专用参数，否则 JDK 8 报 Unrecognized option
 java -version                 # 确认输出 1.8.x 再继续
 ```
@@ -126,11 +130,11 @@ java -version                 # 确认输出 1.8.x 再继续
 ### ① 建库导表（只需一次）
 
 ```powershell
-# mysql.exe 不在 PATH，用完整路径
-& 'F:\dev\mysql\8.4.13\bin\mysql.exe' -uroot -p123456 -e "source F:/WorkSpace/JavaProject/yuoj/yuoj-backend/mysql-init/create_table.sql"
+# mysql.exe 若不在 PATH，用 §4-⓪ 定义的 $mysql
+& $mysql -uroot -p123456 -e "source $repo\yuoj-backend\mysql-init\create_table.sql"
 
 # 验证：应看到 3 张表
-& 'F:\dev\mysql\8.4.13\bin\mysql.exe' -uroot -p123456 -e "use yuoj; show tables;"
+& $mysql -uroot -p123456 -e "use yuoj; show tables;"
 ```
 
 建库 `yuoj` + **3 张表**：`user` / `question` / `question_submit`。
@@ -142,7 +146,7 @@ SQL 里全是 `create ... if not exists`，**重复执行不会清空已有数�
 ### ② 起中间件（RabbitMQ + Nacos）
 
 ```powershell
-docker compose -f F:\WorkSpace\JavaProject\yuoj\yuoj-backend\docker-compose.env.yml up -d rabbitmq nacos
+docker compose -f "$repo\yuoj-backend\docker-compose.env.yml" up -d rabbitmq nacos
 ```
 
 验证：
@@ -156,27 +160,26 @@ docker compose -f F:\WorkSpace\JavaProject\yuoj\yuoj-backend\docker-compose.env.
 netstat -ano | findstr ":8848"
 
 # 编译（必须在线构建，离线会报 Non-resolvable parent POM，见 §7-1）
-cd F:\WorkSpace\JavaProject\yuoj\yuoj-backend
+cd "$repo\yuoj-backend"
 mvn -B -DskipTests install
 ```
 
 然后**开 4 个独立终端**，每个先跑 §4-⓪ 的环境设置，再分别执行（顺序 user → question → judge → gateway，间隔约 10 秒）：
 
 ```powershell
-java -jar F:\WorkSpace\JavaProject\yuoj\yuoj-backend\yuoj-backend-user-service\target\yuoj-backend-user-service-0.0.1-SNAPSHOT.jar
-java -jar F:\WorkSpace\JavaProject\yuoj\yuoj-backend\yuoj-backend-question-service\target\yuoj-backend-question-service-0.0.1-SNAPSHOT.jar
-java -jar F:\WorkSpace\JavaProject\yuoj\yuoj-backend\yuoj-backend-judge-service\target\yuoj-backend-judge-service-0.0.1-SNAPSHOT.jar
-java -jar F:\WorkSpace\JavaProject\yuoj\yuoj-backend\yuoj-backend-gateway\target\yuoj-backend-gateway-0.0.1-SNAPSHOT.jar
+java -jar "$repo\yuoj-backend\yuoj-backend-user-service\target\yuoj-backend-user-service-0.0.1-SNAPSHOT.jar"
+java -jar "$repo\yuoj-backend\yuoj-backend-question-service\target\yuoj-backend-question-service-0.0.1-SNAPSHOT.jar"
+java -jar "$repo\yuoj-backend\yuoj-backend-judge-service\target\yuoj-backend-judge-service-0.0.1-SNAPSHOT.jar"
+java -jar "$repo\yuoj-backend\yuoj-backend-gateway\target\yuoj-backend-gateway-0.0.1-SNAPSHOT.jar"
 ```
 
-或用一条 PowerShell 开 4 个错开启动的窗口（用 `cmd /k` 规避 PowerShell 嵌套引号转义）：
+或用一条 PowerShell 开 4 个错开启动的窗口（用 `Start-Process` 避开 cmd/PowerShell 双层引号转义）：
 
 ```powershell
-$root = 'F:\WorkSpace\JavaProject\yuoj'
 foreach ($d in 'yuoj-backend-user-service','yuoj-backend-question-service','yuoj-backend-judge-service','yuoj-backend-gateway') {
-  $jar = Join-Path $root "yuoj-backend\$d\target\$d-0.0.1-SNAPSHOT.jar"
-  # jar 路径无空格，无需嵌套引号（PowerShell 转义符是反引号而非反斜杠）
-  Start-Process cmd -ArgumentList '/k', "title $d && set JAVA_HOME=F:\dev\java\8 && set PATH=F:\dev\java\8\bin;%PATH% && set MAVEN_OPTS= && java -jar $jar"
+  $jar = Join-Path $repo "yuoj-backend\$d\target\$d-0.0.1-SNAPSHOT.jar"
+  # 子进程继承当前会话环境变量（§4-⓪ 已设好），用 Start-Process java 规避双层引号转义
+  Start-Process java -ArgumentList '-jar', $jar
   Start-Sleep -Seconds 10
 }
 ```
@@ -194,7 +197,7 @@ foreach ($d in 'yuoj-backend-user-service','yuoj-backend-question-service','yuoj
 $env:DOCKER_HOST = 'tcp://localhost:2375'
 curl.exe -s --max-time 5 http://localhost:2375/_ping      # → OK
 
-cd F:\WorkSpace\JavaProject\yuoj\yuoj-code-sandbox
+cd "$repo\yuoj-code-sandbox"
 mvn -B -DskipTests package
 java -jar target\yuoj-code-sandbox-0.0.1-SNAPSHOT.jar
 ```
@@ -204,16 +207,25 @@ java -jar target\yuoj-code-sandbox-0.0.1-SNAPSHOT.jar
 ### ⑤ 起前端
 
 ```powershell
-cd F:\WorkSpace\JavaProject\yuoj\yuoj-frontend
+cd "$repo\yuoj-frontend"
 if (-not (Test-Path node_modules)) { npm install --legacy-peer-deps }   # 首次约几分钟
 npm run serve
 ```
 
-打开 <http://localhost:8080> → 登录（现有账号 `test001`）或注册 → 若需管理员，改 `promote-admin.sql` 里的账号后执行：
+打开 <http://localhost:8080> → 登录或注册 → 若需管理员，把账号填进下面命令的 `<你的账号>`：
 
 ```powershell
-& 'F:\dev\mysql\8.4.13\bin\mysql.exe' -uroot -p123456 -e "source F:/WorkSpace/JavaProject/yuoj/promote-admin.sql"
+# 先看现有账号
+& $mysql -uroot -p123456 -e "use yuoj; select id, userAccount, userName, userRole from user;"
+
+# 提权（确认账号无误再执行）
+& $mysql -uroot -p123456 -e "use yuoj; update user set userRole = 'admin' where userAccount = '<你的账号>';"
+
+# 复核：userRole 应为 admin
+& $mysql -uroot -p123456 -e "use yuoj; select userAccount, userRole from user where userAccount = '<你的账号>';"
 ```
+
+> 原 `promote-admin.sql` 已删除，其内容即上面三条语句。
 
 ### 停止
 
@@ -228,7 +240,7 @@ foreach ($port in 8080,8090,8101,8102,8103,8104) {
     "已终止 端口 $port -> PID $procId"
   }
 }
-docker compose -f F:\WorkSpace\JavaProject\yuoj\yuoj-backend\docker-compose.env.yml stop rabbitmq nacos
+docker compose -f "$repo\yuoj-backend\docker-compose.env.yml" stop rabbitmq nacos
 ```
 
 > 旧 `stop-all.bat` 只按端口 `taskkill`，**并没有**停容器和 node 进程（README 旧描述有误，已修正）。
@@ -297,5 +309,7 @@ curl.exe -s -H "auth: secretKey" -H "Content-Type: application/json" -X POST htt
 ## 8. 回滚
 
 - 数据库 `yuoj` 可 `drop database yuoj;` 后重跑 §4-① 的建库命令
-- 中间件容器：`docker compose -f F:\WorkSpace\JavaProject\yuoj\yuoj-backend\docker-compose.env.yml down`（数据在 `yuoj-backend\.mysql-data` 等目录，如需彻底清理一并删除）
-- **已删除的 8 个启动脚本**（可从 git 恢复）：`git checkout HEAD -- '*.bat' test-sandbox.json`
+- 中间件容器：`docker compose -f "$repo\yuoj-backend\docker-compose.env.yml" down`（数据在 `yuoj-backend\.mysql-data` 等目录，如需彻底清理一并删除）
+- **已删除的启动脚本与工具文件**（10 个，可从 git 恢复）：
+  `git checkout c63be05 -- '*.bat' test-sandbox.json promote-admin.sql clean-comments.py`
+  > 必须指向 `c63be05`（删除前的提交）；`HEAD` 里已无这些文件，用 `HEAD` 会失败。
