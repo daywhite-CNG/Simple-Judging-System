@@ -1,0 +1,33 @@
+# ===== 构建产物 =====
+target/
+dist/
+node_modules/
+
+# ===== 本地运行数据（绝不进仓库）=====
+logs/
+__pycache__/
+*.log
+yuoj-backend/.nacos-data/
+yuoj-backend/.rabbitmq-data/
+yuoj-backend/.mysql-data/
+yuoj-backend/.redis-data/
+yuoj-code-sandbox/tmpCode/
+
+# ===== 备份与临时件 =====
+backup-*/
+backup-*.sql
+# Windows 保留设备名（误重定向产物，任何工具都无法读写）
+nul
+**/nul
+
+# ===== IDE / 系统 =====
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# ===== 本地凭据（若将来改用环境变量方案）=====
+.env
+.env.local
+*.local
